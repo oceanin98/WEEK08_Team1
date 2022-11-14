@@ -1,3 +1,5 @@
+/*VGA디스플레이 드라이버. 화면에 텍스트를 쓰는 일을 담당한다 (이코드 볼필요 없음)*/
+
 #include "devices/vga.h"
 #include <round.h>
 #include <stdint.h>

@@ -1,3 +1,5 @@
+/*커널 스레드와 인터럽트 핸들러가 모두 액서스 하려는 순환 대기열을 관리하기 위한 인터럽트 대기열*/
+
 #include "devices/intq.h"
 #include <debug.h>
 #include "threads/thread.h"

@@ -1,3 +1,5 @@
+/*기본적으로 초당 100번 틱하는 시스템 타이머(수정해야함)*/
+
 #include "devices/timer.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -90,11 +92,14 @@ timer_elapsed (int64_t then) {
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
+	int64_t start = timer_ticks (); //start: 시작 시 시간(tick)
 
-	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	ASSERT (intr_get_level () == INTR_ON); //인터럽트가 들어왔을떄만 실행 (켜놨는지 체크)
+	thread_sleep(start+ticks);//start 에서 원하는 tick 만큼 재워
+
+	/* while (timer_elapsed (start) < ticks) //start로부터 ticks만큼 시간이 지나기 전까지 
+		thread_yield (); //cpu를 양보한다 */
+
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -120,12 +125,31 @@ void
 timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
-/* Timer interrupt handler. */
+
+/*timer interrupt handler*/
+/*haein-1*/
+
+/*timer_interrupt: 매 tick 마다 timer 인터럽트 시 호출하는 함수 
+-sleep queue에서 깨어날 스레드  있는지 확인
+	-sleep queue에서 가장 빨리 꺠어날 스레드의 tick값 확인
+	-있다면 sleep queue를 순회하며 스레드를 깨운다
+	-이떄 thread_awake()사용
+
+	timer_interrupt가 들어올 떄(시간이 증가할 떄),
+	현재 ticks 보다 작은 wakeup_tick(꺠어나야 할 시간)이 있는지 판단.
+	있다면 
+*/
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
-	ticks++;
-	thread_tick ();
+	ticks++; //틱 올리고 
+	thread_tick (); //코드를 제출했을때 검사하는 함수 
+	int64_t next_tick;
+	next_tick= get_next_tick_to_awake(); //next_tick에 꺠워야 할 다음 tick을 받아와
+	
+	if(ticks >= next_tick) 
+	{ //현재 ticks가 next_tick 보다 크면 꺠우자
+		thread_awake(ticks);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -184,3 +208,28 @@ real_time_sleep (int64_t num, int32_t denom) {
 		busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 	}
 }
+// /*timer interrupt handler*/
+// /*haein-1*/
+
+// /*timer_interrupt: 매 tick 마다 timer 인터럽트 시 호출하는 함수 
+// -sleep queue에서 깨어날 스레드  있는지 확인
+// 	-sleep queue에서 가장 빨리 꺠어날 스레드의 tick값 확인
+// 	-있다면 sleep queue를 순회하며 스레드를 깨운다
+// 	-이떄 thread_awake()사용
+//  
+// 	timer_interrupt가 들어올 떄(시간이 증가할 떄),
+// 	현재 ticks 보다 작은 wakeup_tick(꺠어나야 할 시간)이 있는지 판단.
+// 	있다면 
+// */
+// static void
+// timer_interrupt (struct intr_frame *args UNUSED) {
+// 	ticks++; //틱 올리고 
+// 	thread_tick (); //코드를 제출했을때 검사하는 함수 
+// 	init64_t next_tick;
+// 	next_tick= get_next_tick_to_awake(); //next_tick에 꺠워야 할 다음 tick을 받아와
+	
+// 	if(ticks >= next_tick) 
+// 	{ //현재 ticks가 next_tick 보다 크면 꺠우자
+// 		thread_awake(ticks);
+// 	}
+// }

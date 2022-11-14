@@ -24,6 +24,17 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
+
+/*haein-1*/
+
+/*thread_blocked 상태의 스레드를 관리하기 위한 리스트 자료구조 추가*/
+static struct list sleep_list;
+/*next tick to awake: 슬립 리스트에서 대기 중인 스레드들의 wakeup_tick 값 중 최솟값을 저장*/
+static int64_t next_tick_to_awake;
+
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -45,6 +56,9 @@ static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
 
+/*haein-1*/
+static long long next_tick_to_awake;
+
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
@@ -62,6 +76,8 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+
+bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -94,7 +110,7 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
    finishes. */
 void
 thread_init (void) {
-	ASSERT (intr_get_level () == INTR_OFF);
+	ASSERT (intr_get_level () == INTR_OFF); 
 
 	/* Reload the temporal gdt for the kernel
 	 * This gdt does not include the user context.
@@ -110,12 +126,24 @@ thread_init (void) {
 	list_init (&ready_list);
 	list_init (&destruction_req);
 
+/*alarm_clock*/
+list_init(&sleep_list); //sleep_list초기화
+
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
 	initial_thread->status = THREAD_RUNNING;
 	initial_thread->tid = allocate_tid ();
+
+	/*alarm_clock*/
+	/*슬립 큐 & next tick to awake 초기화 코드 추가*/
+	list_init(&sleep_list);
+	next_tick_to_awake = INT64_MAX; //최솟값 찾아가야 하니 초기화할 떄는 정수 최댓값
+
 }
+
+
+
 
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
@@ -232,15 +260,21 @@ thread_block (void) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+
+//스레드가  unblock 될때 우선순위 순으로 정렬 되어 ready_list 에 삽입 되도록 수정 
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
 
 	ASSERT (is_thread (t));
 
-	old_level = intr_disable ();
+	old_level = intr_disable ();  //방해받지않게 감싸준다 
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	/*priority*/
+	list_insert_ordered(&ready_list, &t->elem, &cmp_priority, NULL);
+	//우선 순위별로 정리 할건데, 레디 리스트에서 (&를 쓰는 이유는? 주소를 알려준대) 요소를 찾고 정렬 
+
+	// list_push_back (&ready_list, &t->elem);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -294,18 +328,26 @@ thread_exit (void) {
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
+   /*현재 running 중인 스레드를 비활성화 시키고 ready_list 에 삽입*/
+   /*현재 thread*/
 void
 thread_yield (void) {
-	struct thread *curr = thread_current ();
-	enum intr_level old_level;
+	struct thread *curr = thread_current ();// 현재 실행 중인 스레드
+	enum intr_level old_level; //인터럽트 level: on/off
 
-	ASSERT (!intr_context ());
+	ASSERT (!intr_context ()); //외부 인터럽트가 들어왔다면 true/ 아니면 false
 
-	old_level = intr_disable ();
-	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
-	do_schedule (THREAD_READY);
-	intr_set_level (old_level);
+	old_level = intr_disable (); //인터럽트를 비활성하고 이전 인터럽트 상태(old_level)를 받아온다 
+	if (curr != idle_thread) //현재 스레드가 idle 스레드와 같지 않다면
+		// list_push_back (&ready_list, &curr->elem); //ready리스트 맨 마지막에 curr을 줄세운다
+/*priority*/
+		{
+			list_insert_ordered(&ready_list, &curr->elem, cmp_priority, NULL);
+		}
+
+
+	do_schedule (THREAD_READY); //context switch 작업 수행- running인 스레드를 ready로 전환
+	intr_set_level (old_level); //인자로 전달된 인터럽트 상태로 인터럽트 설정하고 이전 인터럽트 상태 반환
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
@@ -587,4 +629,73 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+/*alarm_clock*/
+/*ticks와 next_tick_to_awake를 비교하여 작은 값을 넣는다*/
+void
+update_next_tick_to_awake(int64_t ticks)
+{
+	next_tick_to_awake= MIN(next_tick_to_awake, ticks);
+}
+
+int64_t get_next_tick_to_awake(void)
+{
+	return next_tick_to_awake;
+}
+/*thread_sleep: thread_yield를 기반으로 만든다 */
+void thread_sleep(int64_t ticks) 
+{
+	struct thread * curr = thread_current();
+	enum intr_level old_level;
+	/*thread 를 blocked 상태로 만들고 sleep queue에 삽입해서 대기 */
+	ASSERT(!intr_context ()); //외부 인터럽트 프로세스 수행 중이면 true, 아니면 fasle
+	 
+	 old_level = intr_disable();
+
+	 curr->wakeup_tick = ticks; //현재 스레드를 깨우는 tick 은 인자로 받은 tick만큼 시간이 지나고
+	 /*thread를 sleep queue에 삽입*/ 
+	 if (curr != idle_thread)
+	 { //idle_thread:유후 스레드. 
+	 		list_push_back (&sleep_list, &thread_current()->elem);
+	 }
+	 update_next_tick_to_awake(ticks); //다음 깨워야할 스레드가 바뀔 가능성이 있으니 최소한 틱을 저장
+	 do_schedule(THREAD_BLOCKED);// context swithch: 이번에는 blocked(sleep)으로 바꿔
+	 intr_set_level(old_level);
+}
+
+void thread_awake(int64_t ticks)
+{
+	next_tick_to_awake = INT64_MAX;
+	struct list_elem *e= list_begin(&sleep_list);
+	struct thread *t;
+
+	for( ; e!= list_end(&sleep_list);)
+	{
+		t= list_entry(e, struct thread, elem);
+		if (t->wakeup_tick <= ticks)
+		{
+			e = list_remove(&t->elem);
+			thread_unblock(t);
+		}
+		else
+		{
+			update_next_tick_to_awake(t->wakeup_tick);
+			e= list_next(e);
+		}
+	}
+}
+/*priority*/
+//인자로 주어진 스레드들의 우선순위를 비교
+//bool을 사용하는게 참거짓 
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+
+	struct thread* t_a;
+	struct thread* t_b;
+	//리스트명단에 스리드 안에 들어있는 a요소 가 t_a 맞나?
+	t_a= list_entry(a, struct thread, elem);
+	t_b= list_entry(b, struct thread, elem);
+	return ((t_a->priority) > (t_b->priority)) ? true : false;
+	//만약에 왼쪽이 우선 순위면? 트루 (1을 반환하도록 한다 )
 }
