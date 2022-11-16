@@ -1,3 +1,5 @@
+/*직접 포트 드라이버. 화면에 텍스트를 쓰는일 담당(이 코드 볼필요 없음)*/
+
 #include "devices/serial.h"
 #include <debug.h>
 #include "devices/input.h"

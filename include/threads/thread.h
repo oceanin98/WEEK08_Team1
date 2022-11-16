@@ -9,13 +9,13 @@
 #include "vm/vm.h"
 #endif
 
-
+//enum은 열거형 
 /* States in a thread's life cycle. */
 enum thread_status {
-	THREAD_RUNNING,     /* Running thread. */
-	THREAD_READY,       /* Not running but ready to run. */
-	THREAD_BLOCKED,     /* Waiting for an event to trigger. */
-	THREAD_DYING        /* About to be destroyed. */
+	THREAD_RUNNING,     /* thread 실행중. */
+	THREAD_READY,       /* 실행할 준비가 되어있지만 실행되고있지않다. 준비된 스레드는 ready_list에 보관*/
+	THREAD_BLOCKED,     /* 잠금을 사용할 수 있게 되거나 인터럽트가 호출될때를 기다리는중 */
+	THREAD_DYING        /* 다음 스레드로 전환후 스캐줄러에 의해 죽음  */
 };
 
 /* Thread identifier type.
@@ -86,6 +86,13 @@ typedef int tid_t;
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
 struct thread {
+
+	/*priority-d*/
+	int init_priority; //도네이션이후 우선순위를 초기화하기 위한 초기값 저장
+	struct lock *wait_on_lock; //해당 스레드가 대기 하고 있는 lock자료구조의 주소를 저장
+	struct list donations;//multiple donation을 고려하기 위해 사용
+	struct list_elem donation_elem; //multiple donation을 고려하기 위해 사용
+
 	/* Owned by thread.c. */
 	tid_t tid;                          /* Thread identifier. */
 	enum thread_status status;          /* Thread state. */
@@ -95,6 +102,11 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
+
+	//꺠어나야할 tick 저장(wakeup_tick)
+	int64_t wakeup_tick;
+
+	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -141,6 +153,31 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+
 void do_iret (struct intr_frame *tf);
+
+
+/*alarm_clock*/
+
+/*실행 중인 스레드를 슬립으로 재운다 */
+void thread_sleep(int64_t ticks);
+/*슬립 큐에서 꺠워야 할 스래드를 깨운다*/
+void thread_awake(int64_t ticks);
+/*최소 틱을 가진 스레드를 저장한다*/
+void update_next_tick_to_awake(int64_t ticks);
+/*thread.c의 next_tick_to_awake 반환*/
+int64_t get_next_tick_to_awake(void);
+
+/*priority*/
+void test_max_priority(void); //현재 수행중인 스레드와 가장 높은 우선순위의 스레드의 우선순위를 비교하여 스케줄링
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+//인자로 주어진 스레드들의 우선순위를 비교
+
+/*priority-d*/
+void donate_priority (void);
+void remove_with_lock(struct lock *);
+void refresh_priority(void);
+
 
 #endif /* threads/thread.h */

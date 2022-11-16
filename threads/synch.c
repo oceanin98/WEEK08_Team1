@@ -48,6 +48,8 @@ sema_init (struct semaphore *sema, unsigned value) {
 	sema->value = value;
 	list_init (&sema->waiters);
 }
+//주어진 value값을 초기화 하며 빈 waiters 리스트를 생성한 다음 곧장 해당 세마포어를 리스트의 첫째 자리에 넣는다.
+
 
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
@@ -57,6 +59,8 @@ sema_init (struct semaphore *sema, unsigned value) {
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. This is
    sema_down function. */
+   
+   //sema_down():세마포어의 p연산, semaphore를 요청하고 획득했을떄 sema value값을 낮춘다 
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -65,8 +69,12 @@ sema_down (struct semaphore *sema) {
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
-	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+	while (sema->value == 0) { //자원이 없는 상태라면 while문을 돌며 현재 스레드를 waiters리스트 맨 끝에 삽입
+		// list_push_back (&sema->waiters, &thread_current ()->elem); //FIFO
+		
+		/*priority*/
+		//기존FIFO인 list_push_back을 list_insert_ordered로 수정 
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, &cmp_priority,NULL);	
 		thread_block ();
 	}
 	sema->value--;
@@ -103,16 +111,23 @@ sema_try_down (struct semaphore *sema) {
 
    This function may be called from an interrupt handler. */
 void
-sema_up (struct semaphore *sema) {
+sema_up (struct semaphore *sema) { //v연산에 해당
 	enum intr_level old_level;
 
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
 	if (!list_empty (&sema->waiters))
+	{
+		/*priority*/
+		/*스레드가 waiters list에 있는 동안 우선순위가 변경 되었을 경우를
+		고려 하여 waiters list를 우선순위로 정렬한다*/
+		list_sort(&sema->waiters, &cmp_priority, NULL);
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
+	}
 	sema->value++;
+	test_max_priority();
 	intr_set_level (old_level);
 }
 
@@ -150,7 +165,9 @@ sema_test_helper (void *sema_) {
 		sema_up (&sema[1]);
 	}
 }
-
+
+
+
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
    is, it is an error for the thread currently holding a lock to
@@ -188,8 +205,22 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	/*priority*/
+	struct thread *t = thread_current();//해당락의
+	if(lock->holder != NULL)//홀더가 존재한다면 아래 작업 수행 
+{
+	t->wait_on_lock = lock; //현재 스레드의 wait_on_lock변수에 획득 하기를 기다리는 lock의 주소를 저장
+	list_push_back(&lock->holder->donations, &t->donation_elem);
+	//miltiple donation을 고려하기 위해 이전상태의 우선순위를 기억, donation 을 받은 스레드의 스레드 구조체를 list로 관리
+	donate_priority();//priority donation수행하기위해 donate_priority()함수 호출
+}
+
+/*donate한 뒤 sema_down했는데 기존에는 lock의 주인이...흠 ??*/
 	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+
+	// lock->holder = thread_current ();
+	t->wait_on_lock = NULL;//lock을 획득 
+	lock->holder= t; //lock holder를 갱신한다 
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -235,7 +266,8 @@ lock_held_by_current_thread (const struct lock *lock) {
 
 	return lock->holder == thread_current ();
 }
-
+
+
 /* One semaphore in a list. */
 struct semaphore_elem {
 	struct list_elem elem;              /* List element. */
@@ -282,6 +314,7 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
+	/*priority*/
 	list_push_back (&cond->waiters, &waiter.elem);
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
@@ -303,8 +336,13 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters))
+	{
+		/*priority*/
+		list_sort(&cond->waiters, &cmp_sem_priority, NULL);
+		
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -320,4 +358,19 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 
 	while (!list_empty (&cond->waiters))
 		cond_signal (cond, lock);
+}
+/*priority*/
+
+bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	struct semaphore_elem *sa = list_entry(a, struct semaphore_elem, elem);
+	struct semaphore_elem *sb = list_entry(b, struct semaphore_elem, elem);
+
+	struct list_elem *sa_e= list_begin(&(sa->semaphore.waiters));
+	struct list_elem *sb_e= list_begin(&(sb->semaphore.waiters));
+
+	struct thread *sa_t = list_entry(sa_e, struct thread, elem);
+	struct thread *sb_t = list_entry(sb_e, struct thread, elem);
+
+	return(sa_t->priority)>(sb_t->priority);
 }

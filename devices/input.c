@@ -1,3 +1,5 @@
+/*입력레이어. 키보드 또는 직렬 드라이버에 의해 전달된 입력문자를 대기열에 넣는다.*/
+
 #include "devices/input.h"
 #include <debug.h>
 #include "devices/intq.h"
