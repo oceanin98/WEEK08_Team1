@@ -12,6 +12,12 @@ Executing 'priority-condvar':
 (priority-condvar) Thread priority 22 starting.
 (priority-condvar) Thread priority 21 starting.
 (priority-condvar) Thread priority 30 starting.
+(priority-condvar) Thread priority 29 starting.
+(priority-condvar) Thread priority 28 starting.
+(priority-condvar) Thread priority 27 starting.
+(priority-condvar) Thread priority 26 starting.
+(priority-condvar) Thread priority 25 starting.
+(priority-condvar) Thread priority 24 starting.
 (priority-condvar) Signaling...
 (priority-condvar) Signaling...
 (priority-condvar) Signaling...
@@ -26,6 +32,6 @@ Executing 'priority-condvar':
 Execution of 'priority-condvar' complete.
 Timer: 31 ticks
 Thread: 0 idle ticks, 31 kernel ticks, 0 user ticks
-Console: 949 characters output
+Console: 1237 characters output
 Keyboard: 0 keys pressed
 Powering off...

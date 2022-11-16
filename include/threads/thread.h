@@ -86,6 +86,13 @@ typedef int tid_t;
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
 struct thread {
+
+	/*priority-d*/
+	int init_priority; //도네이션이후 우선순위를 초기화하기 위한 초기값 저장
+	struct lock *wait_on_lock; //해당 스레드가 대기 하고 있는 lock자료구조의 주소를 저장
+	struct list donations;//multiple donation을 고려하기 위해 사용
+	struct list_elem donation_elem; //multiple donation을 고려하기 위해 사용
+
 	/* Owned by thread.c. */
 	tid_t tid;                          /* Thread identifier. */
 	enum thread_status status;          /* Thread state. */
@@ -146,6 +153,7 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+
 void do_iret (struct intr_frame *tf);
 
 
@@ -163,7 +171,13 @@ int64_t get_next_tick_to_awake(void);
 /*priority*/
 void test_max_priority(void); //현재 수행중인 스레드와 가장 높은 우선순위의 스레드의 우선순위를 비교하여 스케줄링
 bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 //인자로 주어진 스레드들의 우선순위를 비교
+
+/*priority-d*/
+void donate_priority (void);
+void remove_with_lock(struct lock *);
+void refresh_priority(void);
 
 
 #endif /* threads/thread.h */
